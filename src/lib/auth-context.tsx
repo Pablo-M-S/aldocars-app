@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter } from 'expo-router';
-import { api } from './api-client';
+import { api, setUnauthorizedHandler } from './api-client';
 import { sessionStorage } from './secure-storage';
 import type { AuthResponse, AuthUser } from './types';
 
@@ -24,6 +24,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     });
   }, []);
+
+  useEffect(() => {
+    // Qualquer 401 vindo da API (token expirado, revogado, etc.) já limpa o
+    // SecureStore dentro do api-client; aqui só precisamos sincronizar o
+    // estado React e tirar o usuário da área autenticada.
+    setUnauthorizedHandler(() => {
+      setUser(null);
+      router.replace('/(auth)/login');
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [router]);
 
   const login = async (email: string, password: string) => {
     const response = await api.post<AuthResponse>('/auth/login', { email, password });
