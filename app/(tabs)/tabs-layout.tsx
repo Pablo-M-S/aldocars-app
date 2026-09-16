@@ -50,6 +50,15 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="historico"
+        options={{
+          title: 'Histórico',
+          tabBarIcon: ({ color, size, focused }: { color: string; size: number; focused: boolean }) => (
+            <Ionicons name={focused ? 'receipt' : 'receipt-outline'} size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="conta"
         options={{
           title: 'Minha conta',
