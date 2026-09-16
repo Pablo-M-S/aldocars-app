@@ -36,6 +36,15 @@ export interface ServiceItem {
   durationMinutes: number;
 }
 
+export interface Product {
+  id: string;
+  sku: string;
+  name: string;
+  description: string | null;
+  price: string;
+  quantity: number;
+}
+
 export interface Appointment {
   id: string;
   startsAt: string;
