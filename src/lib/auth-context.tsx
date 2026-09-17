@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { useRouter } from 'expo-router';
 import { api, setUnauthorizedHandler } from './api-client';
 import { sessionStorage } from './secure-storage';
+import { registerForPushNotifications, unregisterCurrentDevicePushToken } from './push-notifications';
 import type { AuthResponse, AuthUser } from './types';
 
 interface AuthContextValue {
@@ -22,6 +23,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionStorage.getUser<AuthUser>().then((storedUser) => {
       setUser(storedUser);
       setIsLoading(false);
+      // Fire-and-forget: pedir permissão/registrar o token não pode atrasar
+      // a tela de splash nem bloquear a navegação inicial.
+      if (storedUser) void registerForPushNotifications();
     });
   }, []);
 
@@ -40,10 +44,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const response = await api.post<AuthResponse>('/auth/login', { email, password });
     await sessionStorage.setSession(response.accessToken, response.user);
     setUser(response.user);
+    void registerForPushNotifications();
     router.replace('/(tabs)');
   };
 
   const logout = async () => {
+    // Precisa rodar ANTES de limpar a sessão: desregistrar o token exige
+    // uma requisição autenticada.
+    await unregisterCurrentDevicePushToken();
     await sessionStorage.clear();
     setUser(null);
     router.replace('/(auth)/login');
