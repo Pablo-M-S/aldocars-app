@@ -45,6 +45,47 @@ export interface Product {
   quantity: number;
 }
 
+export interface WorkOrderItem {
+  id: string;
+  quantity: number;
+  unitPrice: string;
+  service: { name: string } | null;
+  product: { name: string } | null;
+}
+
+export interface WorkOrder {
+  id: string;
+  status: string;
+  diagnosis: string | null;
+  laborCost: string;
+  totalCost: string;
+  createdAt: string;
+  items: WorkOrderItem[];
+}
+
+export interface SaleItem {
+  id: string;
+  quantity: number;
+  unitPrice: string;
+  product: { name: string };
+}
+
+export interface Payment {
+  id: string;
+  amount: string;
+  method: string;
+  status: string;
+  paidAt: string | null;
+}
+
+export interface Sale {
+  id: string;
+  totalAmount: string;
+  createdAt: string;
+  items: SaleItem[];
+  payments: Payment[];
+}
+
 export interface Appointment {
   id: string;
   startsAt: string;
