@@ -23,7 +23,7 @@
     },
     "plugins": ["expo-router", "expo-secure-store", "expo-notifications"],
     "extra": {
-      "apiUrl": "http://localhost:3000",
+      "apiUrl": "https://aldo-oficina.onrender.com",
       "eas": {
         "projectId": "COLOQUE_AQUI_O_PROJECT_ID_DEPOIS_DO_EAS_INIT"
       }
