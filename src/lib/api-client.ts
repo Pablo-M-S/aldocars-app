@@ -35,7 +35,7 @@ function extractMessage(body: ApiErrorBody | undefined, fallback: string): strin
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = await sessionStorage.getToken();
 
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(`${API_URL}/v1${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
