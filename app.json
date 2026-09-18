@@ -14,6 +14,12 @@
       "backgroundColor": "#0A1A2B"
     },
     "assetBundlePatterns": ["**/*"],
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/7fc96ba1-82b8-435b-9269-bdd6a205079d"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "br.com.aldocars.app"
