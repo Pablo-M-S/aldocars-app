@@ -7,8 +7,11 @@
     "scheme": "aldocars",
     "userInterfaceStyle": "light",
     "backgroundColor": "#FFFFFF",
+    "icon": "./assets/icon.png",
     "splash": {
-      "backgroundColor": "#16264D"
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A1A2B"
     },
     "assetBundlePatterns": ["**/*"],
     "ios": {
@@ -18,18 +21,15 @@
     "android": {
       "package": "br.com.aldocars.app",
       "adaptiveIcon": {
-        "backgroundColor": "#16264D"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
       }
     },
     "plugins": ["expo-router", "expo-secure-store", "expo-notifications", "expo-font"],
     "extra": {
       "apiUrl": "https://aldo-oficina.onrender.com",
-      "router": {
-        "origin": false
-      },
-      "eas": {
-        "projectId": "7fc96ba1-82b8-435b-9269-bdd6a205079d"
-      }
+      "router": { "origin": false },
+      "eas": { "projectId": "7fc96ba1-82b8-435b-9269-bdd6a205079d" }
     }
   }
 }
