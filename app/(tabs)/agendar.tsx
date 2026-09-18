@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -18,8 +18,36 @@ interface AvailableSlot {
   endsAt: string;
 }
 
+interface DayOption {
+  iso: string;
+  label: string;
+  sublabel: string;
+}
+
+// Janela de datas oferecida no app: hoje + 13 dias seguintes. O backend não
+// impõe um limite de quantos dias no futuro dá pra consultar/agendar, então
+// esse teto é só uma escolha de produto (evita uma lista infinita de chips);
+// pode subir sem qualquer mudança no backend.
+const DAYS_AHEAD = 14;
+
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function buildDayOptions(): DayOption[] {
+  const options: DayOption[] = [];
+  const base = new Date();
+  base.setHours(0, 0, 0, 0);
+
+  for (let i = 0; i < DAYS_AHEAD; i += 1) {
+    const day = new Date(base);
+    day.setDate(base.getDate() + i);
+    const iso = day.toISOString().slice(0, 10);
+    const sublabel = day.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    const label = i === 0 ? 'Hoje' : i === 1 ? 'Amanhã' : day.toLocaleDateString('pt-BR', { weekday: 'short' });
+    options.push({ iso, label, sublabel });
+  }
+  return options;
 }
 
 function formatTime(iso: string): string {
@@ -30,14 +58,25 @@ function formatCurrency(value: string): string {
   return Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+function formatSelectedDate(iso: string): string {
+  // new Date('YYYY-MM-DD') é interpretado como UTC meia-noite; usamos
+  // T00:00:00 local pra evitar a data "voltar um dia" em fusos negativos.
+  return new Date(`${iso}T00:00:00`).toLocaleDateString('pt-BR', {
+    weekday: 'long',
+    day: '2-digit',
+    month: 'long',
+  });
+}
+
 type Step = 'form' | 'slots' | 'done';
 
 export default function AgendarScreen() {
+  const dayOptions = useMemo(buildDayOptions, []);
   const [services, setServices] = useState<ServiceItem[] | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[] | null>(null);
   const [vehicleId, setVehicleId] = useState<string | null>(null);
   const [serviceId, setServiceId] = useState<string | null>(null);
-  const [date] = useState(todayIso());
+  const [date, setDate] = useState(todayIso());
   const [slots, setSlots] = useState<AvailableSlot[]>([]);
   const [step, setStep] = useState<Step>('form');
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +102,12 @@ export default function AgendarScreen() {
       loadOptions();
     }, [loadOptions]),
   );
+
+  function handleSelectDate(iso: string) {
+    setDate(iso);
+    setStep('form');
+    setSlots([]);
+  }
 
   async function handleSearchSlots() {
     if (!serviceId) return;
@@ -141,6 +186,23 @@ export default function AgendarScreen() {
   return (
     <SafeAreaView style={styles.screen} edges={['left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
+        <Text style={styles.sectionTitle}>Data</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayRow}>
+          {dayOptions.map((day) => {
+            const active = date === day.iso;
+            return (
+              <TouchableOpacity
+                key={day.iso}
+                style={[styles.dayChip, active && styles.chipActive]}
+                onPress={() => handleSelectDate(day.iso)}
+              >
+                <Text style={[styles.dayChipLabel, active && styles.chipTextActive]}>{day.label}</Text>
+                <Text style={[styles.dayChipSublabel, active && styles.chipTextActive]}>{day.sublabel}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
         <Text style={styles.sectionTitle}>Veículo</Text>
         <View style={styles.chipRow}>
           {vehicles.map((vehicle) => (
@@ -194,16 +256,16 @@ export default function AgendarScreen() {
             {isLoading ? (
               <ActivityIndicator color={colors.white} />
             ) : (
-              <Text style={styles.buttonText}>Ver horários de hoje</Text>
+              <Text style={styles.buttonText}>Ver horários</Text>
             )}
           </TouchableOpacity>
         )}
 
         {step === 'slots' && (
           <View style={styles.slotsSection}>
-            <Text style={styles.sectionTitle}>Escolha um horário</Text>
+            <Text style={styles.sectionTitle}>Horários em {formatSelectedDate(date)}</Text>
             {slots.length === 0 ? (
-              <Text style={styles.emptyText}>Nenhum horário livre hoje.</Text>
+              <Text style={styles.emptyText}>Nenhum horário livre nesse dia.</Text>
             ) : (
               <View style={styles.chipRow}>
                 {slots.map((slot) => (
@@ -230,6 +292,19 @@ const styles = StyleSheet.create({
   content: { padding: spacing.lg },
   loading: { marginTop: spacing.xl },
   sectionTitle: { fontSize: 13, fontWeight: '600', color: colors.ink, marginTop: spacing.md, marginBottom: spacing.sm },
+  dayRow: { gap: spacing.sm, paddingRight: spacing.sm },
+  dayChip: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.canvas,
+    alignItems: 'center',
+    minWidth: 56,
+  },
+  dayChipLabel: { fontSize: 12, fontWeight: '600', color: colors.ink, textTransform: 'capitalize' },
+  dayChipSublabel: { fontSize: 11, color: colors.inkMuted, marginTop: 2, fontVariant: ['tabular-nums'] },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   chip: {
     borderWidth: 1,

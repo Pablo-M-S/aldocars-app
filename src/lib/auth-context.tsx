@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter } from 'expo-router';
-import { api } from './api-client';
+import { api, setUnauthorizedHandler } from './api-client';
 import { sessionStorage } from './secure-storage';
+import { registerForPushNotifications, unregisterCurrentDevicePushToken } from './push-notifications';
 import type { AuthResponse, AuthUser } from './types';
 
 interface AuthContextValue {
@@ -22,17 +23,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionStorage.getUser<AuthUser>().then((storedUser) => {
       setUser(storedUser);
       setIsLoading(false);
+      // Fire-and-forget: pedir permissão/registrar o token não pode atrasar
+      // a tela de splash nem bloquear a navegação inicial.
+      if (storedUser) void registerForPushNotifications();
     });
   }, []);
+
+  useEffect(() => {
+    // Qualquer 401 vindo da API (token expirado, revogado, etc.) já limpa o
+    // SecureStore dentro do api-client; aqui só precisamos sincronizar o
+    // estado React e tirar o usuário da área autenticada.
+    setUnauthorizedHandler(() => {
+      setUser(null);
+      router.replace('/(auth)/login');
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [router]);
 
   const login = async (email: string, password: string) => {
     const response = await api.post<AuthResponse>('/auth/login', { email, password });
     await sessionStorage.setSession(response.accessToken, response.user);
     setUser(response.user);
+    void registerForPushNotifications();
     router.replace('/(tabs)');
   };
 
   const logout = async () => {
+    // Precisa rodar ANTES de limpar a sessão: desregistrar o token exige
+    // uma requisição autenticada.
+    await unregisterCurrentDevicePushToken();
     await sessionStorage.clear();
     setUser(null);
     router.replace('/(auth)/login');

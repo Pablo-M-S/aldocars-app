@@ -10,9 +10,7 @@
     "splash": {
       "backgroundColor": "#16264D"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "br.com.aldocars.app"
@@ -23,13 +21,9 @@
         "backgroundColor": "#16264D"
       }
     },
-    "plugins": [
-      "expo-router",
-      "expo-secure-store",
-      "expo-font"
-    ],
+    "plugins": ["expo-router", "expo-secure-store", "expo-notifications", "expo-font"],
     "extra": {
-      "apiUrl": "http://localhost:3000",
+      "apiUrl": "https://aldo-oficina.onrender.com",
       "router": {
         "origin": false
       },
