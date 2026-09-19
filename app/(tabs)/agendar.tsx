@@ -6,18 +6,31 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api, ApiError } from '@/lib/api-client';
 import { colors, spacing, radius } from '@/lib/theme';
 import { getServiceIconName, MaterialCommunityIcons } from '@/lib/service-icons';
-import type { CustomerMe, ServiceItem, Vehicle } from '@/lib/types';
+import type { Appointment, CustomerMe, ServiceItem, Vehicle } from '@/lib/types';
 
 // O backend já expõe iconKey/priceIsEstimate no Service, mas o tipo
 // ServiceItem local pode não ter sido atualizado ainda — tipamos aqui
 // em vez de mexer em types.ts, então funciona nos dois casos.
 type ServiceWithIcon = ServiceItem & { iconKey?: string | null; priceIsEstimate?: boolean };
+type AppointmentWithIcon = Appointment & { service: Appointment['service'] & { iconKey?: string | null } };
+
+const UPCOMING_STATUSES = new Set(['SCHEDULED', 'CONFIRMED']);
+
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 interface AvailableSlot {
   startsAt: string;
@@ -87,6 +100,8 @@ export default function AgendarScreen() {
   const [step, setStep] = useState<Step>('form');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [appointments, setAppointments] = useState<AppointmentWithIcon[] | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const loadOptions = useCallback(async () => {
     try {
@@ -98,6 +113,9 @@ export default function AgendarScreen() {
       setVehicles(me.vehicles);
       setVehicleId((current) => current ?? me.vehicles[0]?.id ?? null);
       setServiceId((current) => current ?? servicesData[0]?.id ?? null);
+
+      const appointmentsData = await api.get<AppointmentWithIcon[]>(`/appointments/by-customer/${me.id}`);
+      setAppointments(appointmentsData.filter((item) => UPCOMING_STATUSES.has(item.status)));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Não foi possível carregar os dados.');
     }
@@ -142,10 +160,30 @@ export default function AgendarScreen() {
     try {
       await api.post('/appointments', { vehicleId, serviceId, startsAt: slot.startsAt });
       setStep('done');
+      await loadOptions();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Não foi possível confirmar o agendamento.');
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  function confirmCancel(id: string) {
+    Alert.alert('Cancelar agendamento', 'Tem certeza que deseja cancelar?', [
+      { text: 'Voltar', style: 'cancel' },
+      { text: 'Cancelar agendamento', style: 'destructive', onPress: () => handleCancel(id) },
+    ]);
+  }
+
+  async function handleCancel(id: string) {
+    setCancellingId(id);
+    try {
+      await api.delete(`/appointments/${id}`);
+      await loadOptions();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Não foi possível cancelar o agendamento.');
+    } finally {
+      setCancellingId(null);
     }
   }
 
@@ -172,7 +210,7 @@ export default function AgendarScreen() {
       <SafeAreaView style={styles.screen} edges={['left', 'right']}>
         <View style={styles.doneBox}>
           <Text style={styles.doneTitle}>Agendamento confirmado!</Text>
-          <Text style={styles.doneSubtitle}>Você pode acompanhar em "Início".</Text>
+          <Text style={styles.doneSubtitle}>Você pode acompanhar aqui mesmo, em &quot;Meus agendamentos&quot;.</Text>
           <TouchableOpacity
             style={styles.doneButton}
             onPress={() => {
@@ -192,6 +230,34 @@ export default function AgendarScreen() {
   return (
     <SafeAreaView style={styles.screen} edges={['left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
+        {appointments !== null && appointments.length > 0 && (
+          <View style={styles.upcomingSection}>
+            <Text style={styles.sectionTitle}>Meus agendamentos</Text>
+            {appointments.map((item) => (
+              <View key={item.id} style={styles.upcomingCard}>
+                <View style={styles.upcomingIconWrap}>
+                  <MaterialCommunityIcons
+                    name={getServiceIconName(item.service.iconKey)}
+                    size={20}
+                    color={colors.navy}
+                  />
+                </View>
+                <View style={styles.upcomingInfo}>
+                  <Text style={styles.upcomingTitle}>{item.service.name}</Text>
+                  <Text style={styles.upcomingSubtitle}>
+                    {formatDateTime(item.startsAt)} · {item.vehicle.plate}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => confirmCancel(item.id)} disabled={cancellingId === item.id}>
+                  <Text style={styles.cancelLink}>
+                    {cancellingId === item.id ? 'Cancelando…' : 'Cancelar'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+
         <Text style={styles.sectionTitle}>Data</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayRow}>
           {dayOptions.map((day) => {
@@ -366,6 +432,30 @@ const styles = StyleSheet.create({
   serviceCardMeta: { fontSize: 12, color: colors.inkMuted, marginTop: 2, fontVariant: ['tabular-nums'] },
   serviceCardMetaActive: { color: '#C7D0DD' },
   serviceInfo: { fontSize: 13, color: colors.inkMuted, marginTop: spacing.md },
+  upcomingSection: { marginBottom: spacing.lg },
+  upcomingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.canvas,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  upcomingIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.sm,
+    backgroundColor: colors.brassSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+  upcomingInfo: { flex: 1 },
+  upcomingTitle: { fontSize: 14, fontWeight: '600', color: colors.ink },
+  upcomingSubtitle: { fontSize: 12, color: colors.inkMuted, marginTop: 2, fontVariant: ['tabular-nums'] },
+  cancelLink: { color: colors.danger, fontSize: 12, fontWeight: '600' },
   error: { color: colors.danger, fontSize: 13, marginTop: spacing.md },
   button: {
     backgroundColor: colors.navy,
