@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -8,9 +8,11 @@ import {
   ActivityIndicator,
   Alert,
   TextInput,
+  Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { api, ApiError } from '@/lib/api-client';
 import { colors, spacing, radius } from '@/lib/theme';
 import { getServiceIconName, MaterialCommunityIcons } from '@/lib/service-icons';
@@ -24,6 +26,12 @@ type AppointmentWithIcon = Appointment & { service: Appointment['service'] & { i
 
 const UPCOMING_STATUSES = new Set(['SCHEDULED', 'CONFIRMED']);
 
+// Espelha as regras do backend (scheduling.service.ts) — a checagem real e
+// definitiva é sempre lá; isto aqui é só pra já orientar o cliente na hora
+// de escolher, evitando que ele tente um horário que o servidor vai recusar.
+const BUSINESS_START_HOUR = 8;
+const BUSINESS_END_HOUR = 18;
+
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString('pt-BR', {
     day: '2-digit',
@@ -33,15 +41,11 @@ function formatDateTime(iso: string): string {
   });
 }
 
-interface AvailableSlot {
-  startsAt: string;
-  endsAt: string;
-}
-
 interface DayOption {
   iso: string;
   label: string;
   sublabel: string;
+  disabled: boolean;
 }
 
 // Janela de datas oferecida no app: hoje + 13 dias seguintes. O backend não
@@ -49,10 +53,6 @@ interface DayOption {
 // esse teto é só uma escolha de produto (evita uma lista infinita de chips);
 // pode subir sem qualquer mudança no backend.
 const DAYS_AHEAD = 14;
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 function buildDayOptions(): DayOption[] {
   const options: DayOption[] = [];
@@ -65,13 +65,10 @@ function buildDayOptions(): DayOption[] {
     const iso = day.toISOString().slice(0, 10);
     const sublabel = day.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
     const label = i === 0 ? 'Hoje' : i === 1 ? 'Amanhã' : day.toLocaleDateString('pt-BR', { weekday: 'short' });
-    options.push({ iso, label, sublabel });
+    const weekday = day.getDay();
+    options.push({ iso, label, sublabel, disabled: weekday === 0 || weekday === 6 });
   }
   return options;
-}
-
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
 function formatCurrency(value: string): string {
@@ -88,16 +85,26 @@ function formatSelectedDate(iso: string): string {
   });
 }
 
-type Step = 'form' | 'slots' | 'done';
+function formatHour(value: Date): string {
+  return value.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+
+type Step = 'form' | 'done';
 
 export default function AgendarScreen() {
   const dayOptions = useMemo(buildDayOptions, []);
+  const firstOpenDay = dayOptions.find((d) => !d.disabled)?.iso ?? dayOptions[0].iso;
+
   const [services, setServices] = useState<ServiceItem[] | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[] | null>(null);
   const [vehicleId, setVehicleId] = useState<string | null>(null);
   const [serviceId, setServiceId] = useState<string | null>(null);
-  const [date, setDate] = useState(todayIso());
-  const [slots, setSlots] = useState<AvailableSlot[]>([]);
+  const [date, setDate] = useState(firstOpenDay);
+  const [time, setTime] = useState(() => {
+    const base = new Date(`${firstOpenDay}T00:00:00`);
+    base.setHours(BUSINESS_START_HOUR + 1, 0, 0, 0);
+    return base;
+  });
   const [step, setStep] = useState<Step>('form');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -133,36 +140,49 @@ export default function AgendarScreen() {
     }, [loadOptions]),
   );
 
-  function handleSelectDate(iso: string) {
-    setDate(iso);
-    setStep('form');
-    setSlots([]);
-  }
+  const selectedService = (services?.find((service) => service.id === serviceId) ?? null) as
+    | ServiceWithIcon
+    | null;
 
-  async function handleSearchSlots() {
-    if (!serviceId) return;
-    setError(null);
-    setIsLoading(true);
-    try {
-      // A rota do backend lê os parâmetros da query string, não do corpo
-      // (POST com @Query() no NestJS) — replicamos isso aqui.
-      const query = new URLSearchParams({ serviceId, date }).toString();
-      const result = await api.post<{ availableSlots: AvailableSlot[] }>(
-        `/appointments/availability?${query}`,
-      );
-      setSlots(result.availableSlots);
-      setStep('slots');
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Não foi possível consultar horários.');
-    } finally {
-      setIsLoading(false);
+  const isWeekend = dayOptions.find((d) => d.iso === date)?.disabled ?? false;
+
+  const { minTime, maxTime } = useMemo(() => {
+    const base = new Date(`${date}T00:00:00`);
+    const min = new Date(base);
+    min.setHours(BUSINESS_START_HOUR, 0, 0, 0);
+    const max = new Date(base);
+    max.setHours(BUSINESS_END_HOUR, 0, 0, 0);
+    if (selectedService) {
+      max.setMinutes(max.getMinutes() - selectedService.durationMinutes);
     }
+    return { minTime: min, maxTime: max };
+  }, [date, selectedService]);
+
+  // Sempre que o dia ou o serviço muda, reancora o horário escolhido no novo
+  // dia e garante que ele continua dentro da janela válida (min/max podem
+  // mudar — um serviço mais longo reduz o horário mais tarde permitido).
+  useEffect(() => {
+    setTime((current) => {
+      const candidate = new Date(`${date}T00:00:00`);
+      candidate.setHours(current.getHours(), current.getMinutes(), 0, 0);
+      if (candidate < minTime) return new Date(minTime);
+      if (candidate > maxTime) return new Date(maxTime);
+      return candidate;
+    });
+  }, [date, minTime, maxTime]);
+
+  function handleTimeChange(_event: DateTimePickerEvent, selected?: Date) {
+    if (selected) setTime(selected);
   }
 
   const needsPhone = !savedPhone;
 
-  async function handleConfirm(slot: AvailableSlot) {
-    if (!vehicleId || !serviceId) return;
+  async function handleConfirm() {
+    if (!vehicleId || !serviceId || !selectedService) return;
+    if (isWeekend) {
+      setError('A oficina não abre aos sábados e domingos — escolha outro dia.');
+      return;
+    }
     if (needsPhone && phone.trim() === '') {
       setError('Informe um WhatsApp para contato antes de confirmar.');
       return;
@@ -174,7 +194,9 @@ export default function AgendarScreen() {
         await api.patch(`/customers/${customerId}`, { phone: phone.trim() });
         setSavedPhone(phone.trim());
       }
-      await api.post('/appointments', { vehicleId, serviceId, startsAt: slot.startsAt });
+      const startsAt = new Date(`${date}T00:00:00`);
+      startsAt.setHours(time.getHours(), time.getMinutes(), 0, 0);
+      await api.post('/appointments', { vehicleId, serviceId, startsAt: startsAt.toISOString() });
       setStep('done');
       await loadOptions();
     } catch (err) {
@@ -215,7 +237,7 @@ export default function AgendarScreen() {
     return (
       <SafeAreaView style={styles.screen} edges={['left', 'right']}>
         <View style={styles.emptyState}>
-          <Text style={styles.emptyText}>Cadastre um veículo em "Minha conta" antes de agendar.</Text>
+          <Text style={styles.emptyText}>Cadastre um veículo em &quot;Minha conta&quot; antes de agendar.</Text>
         </View>
       </SafeAreaView>
     );
@@ -227,21 +249,13 @@ export default function AgendarScreen() {
         <View style={styles.doneBox}>
           <Text style={styles.doneTitle}>Agendamento confirmado!</Text>
           <Text style={styles.doneSubtitle}>Você pode acompanhar aqui mesmo, em &quot;Meus agendamentos&quot;.</Text>
-          <TouchableOpacity
-            style={styles.doneButton}
-            onPress={() => {
-              setStep('form');
-              setSlots([]);
-            }}
-          >
+          <TouchableOpacity style={styles.doneButton} onPress={() => setStep('form')}>
             <Text style={styles.doneButtonText}>Agendar outro serviço</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
-
-  const selectedService = services.find((service) => service.id === serviceId);
 
   return (
     <SafeAreaView style={styles.screen} edges={['left', 'right']}>
@@ -281,15 +295,33 @@ export default function AgendarScreen() {
             return (
               <TouchableOpacity
                 key={day.iso}
-                style={[styles.dayChip, active && styles.chipActive]}
-                onPress={() => handleSelectDate(day.iso)}
+                style={[styles.dayChip, active && styles.chipActive, day.disabled && styles.dayChipDisabled]}
+                onPress={() => !day.disabled && setDate(day.iso)}
+                disabled={day.disabled}
               >
-                <Text style={[styles.dayChipLabel, active && styles.chipTextActive]}>{day.label}</Text>
-                <Text style={[styles.dayChipSublabel, active && styles.chipTextActive]}>{day.sublabel}</Text>
+                <Text
+                  style={[
+                    styles.dayChipLabel,
+                    active && styles.chipTextActive,
+                    day.disabled && styles.dayChipTextDisabled,
+                  ]}
+                >
+                  {day.label}
+                </Text>
+                <Text
+                  style={[
+                    styles.dayChipSublabel,
+                    active && styles.chipTextActive,
+                    day.disabled && styles.dayChipTextDisabled,
+                  ]}
+                >
+                  {day.sublabel}
+                </Text>
               </TouchableOpacity>
             );
           })}
         </ScrollView>
+        {isWeekend && <Text style={styles.helperText}>Fechado aos sábados e domingos.</Text>}
 
         <Text style={styles.sectionTitle}>Veículo</Text>
         <View style={styles.chipRow}>
@@ -297,10 +329,7 @@ export default function AgendarScreen() {
             <TouchableOpacity
               key={vehicle.id}
               style={[styles.chip, vehicleId === vehicle.id && styles.chipActive]}
-              onPress={() => {
-                setVehicleId(vehicle.id);
-                setStep('form');
-              }}
+              onPress={() => setVehicleId(vehicle.id)}
             >
               <Text style={[styles.chipText, vehicleId === vehicle.id && styles.chipTextActive]}>
                 {vehicle.plate}
@@ -319,10 +348,7 @@ export default function AgendarScreen() {
               <TouchableOpacity
                 key={service.id}
                 style={[styles.serviceCard, active && styles.serviceCardActive]}
-                onPress={() => {
-                  setServiceId(service.id);
-                  setStep('form');
-                }}
+                onPress={() => setServiceId(service.id)}
               >
                 <View style={[styles.serviceIconWrap, active && styles.serviceIconWrapActive]}>
                   <MaterialCommunityIcons
@@ -342,12 +368,26 @@ export default function AgendarScreen() {
           })}
         </View>
 
-        {selectedService && (
-          <Text style={styles.serviceInfo}>
-            {(selectedService as ServiceWithIcon).priceIsEstimate
-              ? 'O valor final desse serviço depende da avaliação presencial do veículo.'
-              : `${formatCurrency(selectedService.price)} · ${selectedService.durationMinutes} min`}
-          </Text>
+        {!isWeekend && (
+          <>
+            <Text style={styles.sectionTitle}>Horário em {formatSelectedDate(date)}</Text>
+            <Text style={styles.helperText}>
+              Entre {formatHour(minTime)} e {formatHour(maxTime)}
+            </Text>
+            <View style={styles.pickerWrap}>
+              <DateTimePicker
+                value={time}
+                mode="time"
+                display="spinner"
+                is24Hour
+                locale="pt-BR"
+                minimumDate={minTime}
+                maximumDate={maxTime}
+                onChange={handleTimeChange}
+                style={styles.picker}
+              />
+            </View>
+          </>
         )}
 
         {needsPhone && (
@@ -369,41 +409,17 @@ export default function AgendarScreen() {
 
         {error && <Text style={styles.error}>{error}</Text>}
 
-        {step === 'form' && (
-          <TouchableOpacity
-            style={[styles.button, isLoading && styles.buttonDisabled]}
-            onPress={handleSearchSlots}
-            disabled={isLoading || !vehicleId || !serviceId || (needsPhone && phone.trim() === '')}
-          >
-            {isLoading ? (
-              <ActivityIndicator color={colors.white} />
-            ) : (
-              <Text style={styles.buttonText}>Ver horários</Text>
-            )}
-          </TouchableOpacity>
-        )}
-
-        {step === 'slots' && (
-          <View style={styles.slotsSection}>
-            <Text style={styles.sectionTitle}>Horários em {formatSelectedDate(date)}</Text>
-            {slots.length === 0 ? (
-              <Text style={styles.emptyText}>Nenhum horário livre nesse dia.</Text>
-            ) : (
-              <View style={styles.chipRow}>
-                {slots.map((slot) => (
-                  <TouchableOpacity
-                    key={slot.startsAt}
-                    style={styles.chip}
-                    disabled={isLoading}
-                    onPress={() => handleConfirm(slot)}
-                  >
-                    <Text style={styles.chipText}>{formatTime(slot.startsAt)}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </View>
-        )}
+        <TouchableOpacity
+          style={[styles.button, isLoading && styles.buttonDisabled]}
+          onPress={handleConfirm}
+          disabled={isLoading || !vehicleId || !serviceId || isWeekend || (needsPhone && phone.trim() === '')}
+        >
+          {isLoading ? (
+            <ActivityIndicator color={colors.white} />
+          ) : (
+            <Text style={styles.buttonText}>Confirmar agendamento</Text>
+          )}
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -425,8 +441,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minWidth: 56,
   },
+  dayChipDisabled: { opacity: 0.4 },
   dayChipLabel: { fontSize: 12, fontWeight: '600', color: colors.ink, textTransform: 'capitalize' },
   dayChipSublabel: { fontSize: 11, color: colors.inkMuted, marginTop: 2, fontVariant: ['tabular-nums'] },
+  dayChipTextDisabled: { color: colors.inkMuted },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   chip: {
     borderWidth: 1,
@@ -464,7 +482,15 @@ const styles = StyleSheet.create({
   serviceCardTitle: { fontSize: 14, fontWeight: '600', color: colors.ink },
   serviceCardMeta: { fontSize: 12, color: colors.inkMuted, marginTop: 2, fontVariant: ['tabular-nums'] },
   serviceCardMetaActive: { color: '#C7D0DD' },
-  serviceInfo: { fontSize: 13, color: colors.inkMuted, marginTop: spacing.md },
+  pickerWrap: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    backgroundColor: colors.canvas,
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  picker: { width: '100%', height: Platform.OS === 'ios' ? 170 : 140 },
   input: {
     borderWidth: 1,
     borderColor: colors.line,
@@ -510,7 +536,6 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: colors.white, fontWeight: '600', fontSize: 15 },
-  slotsSection: { marginTop: spacing.lg },
   emptyText: { fontSize: 14, color: colors.inkMuted },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
   doneBox: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
