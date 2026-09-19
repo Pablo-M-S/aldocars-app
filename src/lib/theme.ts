@@ -1,15 +1,16 @@
-// Mesma identidade visual do painel e do site (continuidade de marca):
-// branco + navy, acento em latão reservado para ações primárias.
+// Paleta extraída diretamente da logo oficial da Aldocar (navy + azul de
+// destaque + prata), a mesma usada no ícone e na splash screen do app.
 export const colors = {
   canvas: '#FFFFFF',
   surface: '#F7F8FA',
   line: '#E3E7EE',
-  ink: '#10192B',
+  ink: '#0A1A2B',
   inkMuted: '#5B6478',
-  navy: '#16264D',
-  navyDeep: '#0B1730',
-  brass: '#B8862E',
-  brassSoft: '#F1E4CB',
+  navy: '#0A1A2B',
+  navyDeep: '#050D17',
+  brass: '#0B579F',
+  brassSoft: '#E4EEF8',
+  silver: '#A8ADB4',
   success: '#1F7A4D',
   warning: '#B8862E',
   danger: '#B3261E',
@@ -27,4 +28,5 @@ export const spacing = {
 export const radius = {
   sm: 4,
   md: 6,
+  lg: 14,
 };
