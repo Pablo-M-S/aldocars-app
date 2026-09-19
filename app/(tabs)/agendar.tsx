@@ -11,7 +11,13 @@ import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api, ApiError } from '@/lib/api-client';
 import { colors, spacing, radius } from '@/lib/theme';
+import { getServiceIconName, MaterialCommunityIcons } from '@/lib/service-icons';
 import type { CustomerMe, ServiceItem, Vehicle } from '@/lib/types';
+
+// O backend já expõe iconKey/priceIsEstimate no Service, mas o tipo
+// ServiceItem local pode não ter sido atualizado ainda — tipamos aqui
+// em vez de mexer em types.ts, então funciona nos dois casos.
+type ServiceWithIcon = ServiceItem & { iconKey?: string | null; priceIsEstimate?: boolean };
 
 interface AvailableSlot {
   startsAt: string;
@@ -222,26 +228,43 @@ export default function AgendarScreen() {
         </View>
 
         <Text style={styles.sectionTitle}>Serviço</Text>
-        <View style={styles.chipRow}>
-          {services.map((service) => (
-            <TouchableOpacity
-              key={service.id}
-              style={[styles.chip, serviceId === service.id && styles.chipActive]}
-              onPress={() => {
-                setServiceId(service.id);
-                setStep('form');
-              }}
-            >
-              <Text style={[styles.chipText, serviceId === service.id && styles.chipTextActive]}>
-                {service.name}
-              </Text>
-            </TouchableOpacity>
-          ))}
+        <View style={styles.serviceList}>
+          {services.map((service) => {
+            const active = serviceId === service.id;
+            const iconKey = (service as ServiceWithIcon).iconKey;
+            const priceIsEstimate = (service as ServiceWithIcon).priceIsEstimate;
+            return (
+              <TouchableOpacity
+                key={service.id}
+                style={[styles.serviceCard, active && styles.serviceCardActive]}
+                onPress={() => {
+                  setServiceId(service.id);
+                  setStep('form');
+                }}
+              >
+                <View style={[styles.serviceIconWrap, active && styles.serviceIconWrapActive]}>
+                  <MaterialCommunityIcons
+                    name={getServiceIconName(iconKey)}
+                    size={20}
+                    color={active ? colors.white : colors.navy}
+                  />
+                </View>
+                <View style={styles.serviceCardBody}>
+                  <Text style={[styles.serviceCardTitle, active && styles.chipTextActive]}>{service.name}</Text>
+                  <Text style={[styles.serviceCardMeta, active && styles.serviceCardMetaActive]}>
+                    {priceIsEstimate ? 'Valor sob avaliação' : formatCurrency(service.price)} · {service.durationMinutes} min
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         {selectedService && (
           <Text style={styles.serviceInfo}>
-            {formatCurrency(selectedService.price)} · {selectedService.durationMinutes} min
+            {(selectedService as ServiceWithIcon).priceIsEstimate
+              ? 'O valor final desse serviço depende da avaliação presencial do veículo.'
+              : `${formatCurrency(selectedService.price)} · ${selectedService.durationMinutes} min`}
           </Text>
         )}
 
@@ -317,6 +340,31 @@ const styles = StyleSheet.create({
   chipActive: { borderColor: colors.navy, backgroundColor: colors.navy },
   chipText: { fontSize: 13, color: colors.ink },
   chipTextActive: { color: colors.white, fontWeight: '600' },
+  serviceList: { gap: spacing.sm },
+  serviceCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    backgroundColor: colors.canvas,
+    padding: spacing.sm,
+  },
+  serviceCardActive: { borderColor: colors.navy, backgroundColor: colors.navy },
+  serviceIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.sm,
+    backgroundColor: colors.brassSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+  serviceIconWrapActive: { backgroundColor: 'rgba(255,255,255,0.15)' },
+  serviceCardBody: { flex: 1 },
+  serviceCardTitle: { fontSize: 14, fontWeight: '600', color: colors.ink },
+  serviceCardMeta: { fontSize: 12, color: colors.inkMuted, marginTop: 2, fontVariant: ['tabular-nums'] },
+  serviceCardMetaActive: { color: '#C7D0DD' },
   serviceInfo: { fontSize: 13, color: colors.inkMuted, marginTop: spacing.md },
   error: { color: colors.danger, fontSize: 13, marginTop: spacing.md },
   button: {
