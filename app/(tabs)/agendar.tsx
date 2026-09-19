@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  TextInput,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -102,6 +103,9 @@ export default function AgendarScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [appointments, setAppointments] = useState<AppointmentWithIcon[] | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [customerId, setCustomerId] = useState<string | null>(null);
+  const [savedPhone, setSavedPhone] = useState<string | null>(null);
+  const [phone, setPhone] = useState('');
 
   const loadOptions = useCallback(async () => {
     try {
@@ -113,6 +117,8 @@ export default function AgendarScreen() {
       setVehicles(me.vehicles);
       setVehicleId((current) => current ?? me.vehicles[0]?.id ?? null);
       setServiceId((current) => current ?? servicesData[0]?.id ?? null);
+      setCustomerId(me.id);
+      setSavedPhone(me.phone);
 
       const appointmentsData = await api.get<AppointmentWithIcon[]>(`/appointments/by-customer/${me.id}`);
       setAppointments(appointmentsData.filter((item) => UPCOMING_STATUSES.has(item.status)));
@@ -153,11 +159,21 @@ export default function AgendarScreen() {
     }
   }
 
+  const needsPhone = !savedPhone;
+
   async function handleConfirm(slot: AvailableSlot) {
     if (!vehicleId || !serviceId) return;
+    if (needsPhone && phone.trim() === '') {
+      setError('Informe um WhatsApp para contato antes de confirmar.');
+      return;
+    }
     setError(null);
     setIsLoading(true);
     try {
+      if (needsPhone && customerId) {
+        await api.patch(`/customers/${customerId}`, { phone: phone.trim() });
+        setSavedPhone(phone.trim());
+      }
       await api.post('/appointments', { vehicleId, serviceId, startsAt: slot.startsAt });
       setStep('done');
       await loadOptions();
@@ -334,13 +350,30 @@ export default function AgendarScreen() {
           </Text>
         )}
 
+        {needsPhone && (
+          <>
+            <Text style={styles.sectionTitle}>WhatsApp para contato</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="(00) 00000-0000"
+              placeholderTextColor={colors.inkMuted}
+              keyboardType="phone-pad"
+              value={phone}
+              onChangeText={setPhone}
+            />
+            <Text style={styles.helperText}>
+              Usamos esse número só para falar sobre o orçamento e o andamento do seu veículo.
+            </Text>
+          </>
+        )}
+
         {error && <Text style={styles.error}>{error}</Text>}
 
         {step === 'form' && (
           <TouchableOpacity
             style={[styles.button, isLoading && styles.buttonDisabled]}
             onPress={handleSearchSlots}
-            disabled={isLoading || !vehicleId || !serviceId}
+            disabled={isLoading || !vehicleId || !serviceId || (needsPhone && phone.trim() === '')}
           >
             {isLoading ? (
               <ActivityIndicator color={colors.white} />
@@ -432,6 +465,17 @@ const styles = StyleSheet.create({
   serviceCardMeta: { fontSize: 12, color: colors.inkMuted, marginTop: 2, fontVariant: ['tabular-nums'] },
   serviceCardMetaActive: { color: '#C7D0DD' },
   serviceInfo: { fontSize: 13, color: colors.inkMuted, marginTop: spacing.md },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.canvas,
+    fontSize: 14,
+    color: colors.ink,
+  },
+  helperText: { fontSize: 11, color: colors.inkMuted, marginTop: spacing.xs },
   upcomingSection: { marginBottom: spacing.lg },
   upcomingCard: {
     flexDirection: 'row',
